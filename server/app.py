@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from models import db, Restaurant, RestaurantPizza, Pizza
 from flask_migrate import Migrate
-from flask import Flask, request, make_response
+from flask import Flask, request, make_response, jsonify
 from flask_restful import Api, Resource
 import os
 
@@ -23,6 +23,101 @@ api = Api(app)
 @app.route("/")
 def index():
     return "<h1>Code challenge</h1>"
+
+# ---------- RESTAURANTS ----------
+
+class Restaurants(Resource):
+    def get(self):
+        restaurants = Restaurant.query.all()
+        return make_response(
+            jsonify([restaurant.to_dict(only=("id", "name", "address")) for restaurant in restaurants]), 200
+        )
+
+
+class RestaurantByID(Resource):
+    def get(self, id):
+        restaurant = Restaurant.query.get(id)
+        if not restaurant:
+            return make_response(jsonify({"error": "Restaurant not found"}), 404)
+        return make_response(
+            jsonify(
+                restaurant.to_dict(
+                    rules=("-restaurant_pizzas.restaurant", "-restaurant_pizzas.pizza.restaurant_pizzas")
+                )
+            ),
+            200,
+        )
+
+    def delete(self, id):
+        restaurant = Restaurant.query.get(id)
+        if not restaurant:
+            return make_response(jsonify({"error": "Restaurant not found"}), 404)
+        db.session.delete(restaurant)
+        db.session.commit()
+        return make_response("", 204)
+
+
+# ---------- PIZZAS ----------
+
+class Pizzas(Resource):
+    def get(self):
+        pizzas = Pizza.query.all()
+        return make_response(
+            jsonify([pizza.to_dict(only=("id", "name", "ingredients")) for pizza in pizzas]), 200
+        )
+
+
+# ---------- RESTAURANT PIZZAS ----------
+
+class RestaurantPizzas(Resource):
+    def post(self):
+        data = request.get_json()
+
+        try:
+            price = data.get("price")
+            pizza_id = data.get("pizza_id")
+            restaurant_id = data.get("restaurant_id")
+
+            pizza = Pizza.query.get(pizza_id)
+            restaurant = Restaurant.query.get(restaurant_id)
+
+            if not pizza or not restaurant:
+                return make_response(
+                    jsonify({"errors": ["Invalid pizza_id or restaurant_id"]}), 400
+                )
+
+            # Create inside try so ValueError is caught:
+            restaurant_pizza = RestaurantPizza(
+                price=price,
+                pizza_id=pizza_id,
+                restaurant_id=restaurant_id
+            )
+
+            db.session.add(restaurant_pizza)
+            db.session.commit()
+
+            return make_response(
+                jsonify(
+                    restaurant_pizza.to_dict(
+                        rules=(
+                            "-pizza.restaurant_pizzas",
+                            "-restaurant.restaurant_pizzas",
+                        )
+                    )
+                ),
+                201,
+            )
+
+        except ValueError as e:
+            return make_response(jsonify({"errors": [str(e)]}), 400)
+# ---------- ROUTES ----------
+
+api.add_resource(Restaurants, "/restaurants")
+api.add_resource(RestaurantByID, "/restaurants/<int:id>")
+api.add_resource(Pizzas, "/pizzas")
+api.add_resource(RestaurantPizzas, "/restaurant_pizzas")
+
+
 
 
 if __name__ == "__main__":
